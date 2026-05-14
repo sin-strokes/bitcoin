@@ -1285,7 +1285,7 @@ bool DescriptorScriptPubKeyMan::SignTransaction(CMutableTransaction& tx, const s
         keys->Merge(std::move(*coin_keys));
     }
 
-    return ::SignTransaction(tx, keys.get(), coins, sighash, input_errors);
+    return ::SignTransaction(tx, keys.get(), coins, {.sighash_type = sighash}, input_errors);
 }
 
 SigningResult DescriptorScriptPubKeyMan::SignMessage(const std::string& message, const PKHash& pkhash, std::string& str_sig) const
@@ -1306,13 +1306,12 @@ SigningResult DescriptorScriptPubKeyMan::SignMessage(const std::string& message,
     return SigningResult::OK;
 }
 
-std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbtx, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type, bool sign, bool bip32derivs, int* n_signed, bool finalize) const
+std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbtx, const PrecomputedTransactionData& txdata, const common::PSBTFillOptions& options, int* n_signed) const
 {
     if (n_signed) {
         *n_signed = 0;
     }
-    for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
-        const CTxIn& txin = psbtx.tx->vin[i];
+    for (unsigned int i = 0; i < psbtx.inputs.size(); ++i) {
         PSBTInput& input = psbtx.inputs.at(i);
 
         if (PSBTInputSigned(input)) {
@@ -1324,17 +1323,17 @@ std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTran
         if (!input.witness_utxo.IsNull()) {
             script = input.witness_utxo.scriptPubKey;
         } else if (input.non_witness_utxo) {
-            if (txin.prevout.n >= input.non_witness_utxo->vout.size()) {
+            if (input.prev_out >= input.non_witness_utxo->vout.size()) {
                 return PSBTError::MISSING_INPUTS;
             }
-            script = input.non_witness_utxo->vout[txin.prevout.n].scriptPubKey;
+            script = input.non_witness_utxo->vout[input.prev_out].scriptPubKey;
         } else {
             // There's no UTXO so we can just skip this now
             continue;
         }
 
         std::unique_ptr<FlatSigningProvider> keys = std::make_unique<FlatSigningProvider>();
-        std::unique_ptr<FlatSigningProvider> script_keys = GetSigningProvider(script, /*include_private=*/sign);
+        std::unique_ptr<FlatSigningProvider> script_keys = GetSigningProvider(script, /*include_private=*/options.sign);
         if (script_keys) {
             keys->Merge(std::move(*script_keys));
         } else {
@@ -1376,13 +1375,13 @@ std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTran
             }
         }
 
-        PSBTError res = SignPSBTInput(HidingSigningProvider(keys.get(), /*hide_secret=*/!sign, /*hide_origin=*/!bip32derivs), psbtx, i, &txdata, sighash_type, nullptr, finalize);
+        PSBTError res = SignPSBTInput(HidingSigningProvider(keys.get(), /*hide_secret=*/!options.sign, /*hide_origin=*/!options.bip32_derivs), psbtx, i, &txdata, options, /*out_sigdata=*/nullptr);
         if (res != PSBTError::OK && res != PSBTError::INCOMPLETE) {
             return res;
         }
 
         bool signed_one = PSBTInputSigned(input);
-        if (n_signed && (signed_one || !sign)) {
+        if (n_signed && (signed_one || !options.sign)) {
             // If sign is false, we assume that we _could_ sign if we get here. This
             // will never have false negatives; it is hard to tell under what i
             // circumstances it could have false positives.
@@ -1391,12 +1390,12 @@ std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTran
     }
 
     // Fill in the bip32 keypaths and redeemscripts for the outputs so that hardware wallets can identify change
-    for (unsigned int i = 0; i < psbtx.tx->vout.size(); ++i) {
-        std::unique_ptr<SigningProvider> keys = GetSolvingProvider(psbtx.tx->vout.at(i).scriptPubKey);
+    for (unsigned int i = 0; i < psbtx.outputs.size(); ++i) {
+        std::unique_ptr<SigningProvider> keys = GetSolvingProvider(psbtx.outputs.at(i).script);
         if (!keys) {
             continue;
         }
-        UpdatePSBTOutput(HidingSigningProvider(keys.get(), /*hide_secret=*/true, /*hide_origin=*/!bip32derivs), psbtx, i);
+        UpdatePSBTOutput(HidingSigningProvider(keys.get(), /*hide_secret=*/true, /*hide_origin=*/!options.bip32_derivs), psbtx, i);
     }
 
     return {};

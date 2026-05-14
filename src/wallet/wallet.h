@@ -74,7 +74,7 @@ struct CBlockLocator;
 struct CExtKey;
 struct FlatSigningProvider;
 struct KeyOriginInfo;
-struct PartiallySignedTransaction;
+class PartiallySignedTransaction;
 struct SignatureData;
 
 using LoadWalletFn = std::function<void(std::unique_ptr<interfaces::Wallet> wallet)>;
@@ -347,7 +347,6 @@ private:
      * block_hash.IsNull(), then wallet state is not updated in AddToWallet, but
      * notifications happen and cached balances are marked dirty.
      *
-     * If fUpdate is true, existing transactions will be updated.
      * TODO: One exception to this is that the abandoned state is cleared under the
      * assumption that any further notification of a transaction that was considered
      * abandoned is an indication that it is not safe to be considered abandoned.
@@ -357,7 +356,7 @@ private:
      * Should be called with rescanning_old_block set to true, if the transaction is
      * not discovered in real time, but during a rescan of old blocks.
      */
-    bool AddToWalletIfInvolvingMe(const CTransactionRef& tx, const SyncTxState& state, bool fUpdate, bool rescanning_old_block) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    bool AddToWalletIfInvolvingMe(const CTransactionRef& tx, const SyncTxState& state, bool rescanning_old_block) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     /** Mark a transaction (and its in-wallet descendants) as conflicting with a particular block. */
     void MarkConflicted(const uint256& hashBlock, int conflicting_height, const Txid& hashTx);
@@ -375,7 +374,7 @@ private:
 
     void SyncMetaData(std::pair<TxSpends::iterator, TxSpends::iterator>) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
-    bool SyncTransaction(const CTransactionRef& tx, const SyncTxState& state, bool update_tx = true, bool rescanning_old_block = false) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    bool SyncTransaction(const CTransactionRef& tx, const SyncTxState& state, bool rescanning_old_block = false) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     /** WalletFlags set on this wallet. */
     std::atomic<uint64_t> m_wallet_flags{0};
@@ -635,7 +634,7 @@ public:
     void blockConnected(const kernel::ChainstateRole& role, const interfaces::BlockInfo& block) override;
     void blockDisconnected(const interfaces::BlockInfo& block) override;
     void updatedBlockTip() override;
-    int64_t RescanFromTime(int64_t startTime, const WalletRescanReserver& reserver, bool update);
+    int64_t RescanFromTime(int64_t startTime, const WalletRescanReserver& reserver);
 
     struct ScanResult {
         enum { SUCCESS, FAILURE, USER_ABORT } status = SUCCESS;
@@ -652,7 +651,7 @@ public:
         //! USER_ABORT.
         uint256 last_failed_block;
     };
-    ScanResult ScanForWalletTransactions(const uint256& start_block, int start_height, std::optional<int> max_height, const WalletRescanReserver& reserver, bool fUpdate, bool save_progress);
+    ScanResult ScanForWalletTransactions(const uint256& start_block, int start_height, std::optional<int> max_height, const WalletRescanReserver& reserver, bool save_progress);
     void transactionRemovedFromMempool(const CTransactionRef& tx, MemPoolRemovalReason reason) override;
     /** Set the next time this wallet should resend transactions to 12-36 hours from now, ~1 day on average. */
     void SetNextResend() { m_next_resend = GetDefaultNextResend(); }
@@ -670,26 +669,20 @@ public:
 
     /**
      * Fills out a PSBT with information from the wallet. Fills in UTXOs if we have
-     * them. Tries to sign if sign=true. Sets `complete` if the PSBT is now complete
-     * (i.e. has all required signatures or signature-parts, and is ready to
-     * finalize.) Sets `error` and returns false if something goes wrong.
+     * them. Tries to sign if options.sign=true.
+     * Sets `complete` if the PSBT is now complete (i.e. has all required
+     * signatures or signature-parts, and is ready to finalize.)
      *
      * @param[in]  psbtx PartiallySignedTransaction to fill in
+     * @param[in]  options options for filling or signing
      * @param[out] complete indicates whether the PSBT is now complete
-     * @param[in]  sighash_type the sighash type to use when signing (if PSBT does not specify)
-     * @param[in]  sign whether to sign or not
-     * @param[in]  bip32derivs whether to fill in bip32 derivation information if available
      * @param[out] n_signed the number of inputs signed by this wallet
-     * @param[in] finalize whether to create the final scriptSig or scriptWitness if possible
-     * return error
+     * @returns an error if something goes wrong
      */
     std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbtx,
+                  const common::PSBTFillOptions& options,
                   bool& complete,
-                  std::optional<int> sighash_type = std::nullopt,
-                  bool sign = true,
-                  bool bip32derivs = true,
-                  size_t* n_signed = nullptr,
-                  bool finalize = true) const;
+                  size_t* n_signed = nullptr) const;
 
     /**
      * Submit the transaction to the node's mempool and then relay to peers.
@@ -1150,6 +1143,9 @@ struct MigrationResult {
 [[nodiscard]] util::Result<MigrationResult> MigrateLegacyToDescriptor(const std::string& wallet_name, const SecureString& passphrase, WalletContext& context);
 //! Requirement: The wallet provided to this function must be isolated, with no attachment to the node's context.
 [[nodiscard]] util::Result<MigrationResult> MigrateLegacyToDescriptor(std::shared_ptr<CWallet> local_wallet, const SecureString& passphrase, WalletContext& context);
+
+//! Determine the path that the wallet is stored in
+util::Result<fs::path> GetWalletPath(const std::string& name);
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_WALLET_H

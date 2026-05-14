@@ -183,7 +183,7 @@ void SyncUpWallet(const std::shared_ptr<CWallet>& wallet, interfaces::Node& node
 {
     WalletRescanReserver reserver(*wallet);
     reserver.reserve();
-    CWallet::ScanResult result = wallet->ScanForWalletTransactions(Params().GetConsensus().hashGenesisBlock, /*start_height=*/0, /*max_height=*/{}, reserver, /*fUpdate=*/true, /*save_progress=*/false);
+    CWallet::ScanResult result = wallet->ScanForWalletTransactions(Params().GetConsensus().hashGenesisBlock, /*start_height=*/0, /*max_height=*/{}, reserver, /*save_progress=*/false);
     QCOMPARE(result.status, CWallet::ScanResult::SUCCESS);
     QCOMPARE(result.last_scanned_block, WITH_LOCK(node.context()->chainman->GetMutex(), return node.context()->chainman->ActiveChain().Tip()->GetBlockHash()));
     QVERIFY(result.last_failed_block.IsNull());
@@ -431,9 +431,8 @@ void TestGUIWatchOnly(interfaces::Node& node, TestChain100Setup& test)
     // Decode psbt
     std::optional<std::vector<unsigned char>> decoded_psbt = DecodeBase64(psbt_string);
     QVERIFY(decoded_psbt);
-    PartiallySignedTransaction psbt;
-    std::string err;
-    QVERIFY(DecodeRawPSBT(psbt, MakeByteSpan(*decoded_psbt), err));
+    util::Result<PartiallySignedTransaction> psbt = DecodeRawPSBT(MakeByteSpan(*decoded_psbt));
+    QVERIFY(psbt);
 }
 
 void TestGUI(interfaces::Node& node)
