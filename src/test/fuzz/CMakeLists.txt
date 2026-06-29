@@ -40,6 +40,7 @@ add_executable(fuzz
   crypto_hkdf_hmac_sha256_l32.cpp
   crypto_poly1305.cpp
   cuckoocache.cpp
+  dbwrapper.cpp
   decode_tx.cpp
   descriptor_parse.cpp
   deserialize.cpp
@@ -153,7 +154,6 @@ target_link_libraries(fuzz
   univalue
   secp256k1
   Boost::headers
-  libevent::extra
 )
 
 if(ENABLE_WALLET)
